@@ -7,17 +7,31 @@ function safeTrim(s) {
   return typeof s === "string" ? s.trim() : "";
 }
 
-function mapConnStateToLabel(state) {
+function isWsConnectedState(state) {
+  return state === "open" || state === "mock";
+}
+
+function isWsTransientState(state) {
+  return state === "connecting" || state === "closing";
+}
+
+function isWsHardDisconnected(state) {
+  return state === "idle" || state === "closed" || state === "error";
+}
+
+function mapConnStateToLabel(state, reconnecting) {
   if (state === "open") return "Connected";
-  if (state === "connecting") return "Connecting";
   if (state === "mock") return "Connected (Mock)";
+  if (reconnecting && (state === "connecting" || state === "error" || state === "closed")) return "Reconnecting…";
+  if (state === "connecting") return "Connecting";
   if (state === "closing") return "Disconnecting";
   // idle/closed/error -> disconnected for user-facing simplicity
   return "Disconnected";
 }
 
-function mapConnStateToTone(state) {
+function mapConnStateToTone(state, reconnecting) {
   if (state === "open" || state === "mock") return "good";
+  if (reconnecting) return "warn";
   if (state === "connecting" || state === "closing") return "warn";
   if (state === "error") return "bad";
   return "neutral";
@@ -34,13 +48,36 @@ function pushNotice(setNotices, notice) {
   return id;
 }
 
+function clampMs(n, min, max) {
+  const v = Number.isFinite(n) ? n : min;
+  return Math.max(min, Math.min(max, v));
+}
+
+/**
+ * PUBLIC_INTERFACE
+ * Small pure helper for unit testing lobby transitions.
+ */
+// PUBLIC_INTERFACE
+export function __reduceLobbyState(prev, action) {
+  /** Reduce lobby state for predictable transitions; used by small unit tests. */
+  const s = prev || { joinedQueue: false, queueState: "idle" };
+  const t = action?.type;
+
+  if (t === "RESET") return { joinedQueue: false, queueState: "idle" };
+  if (t === "JOIN_REQUESTED") return { joinedQueue: true, queueState: "searching" };
+  if (t === "LEAVE_REQUESTED") return { joinedQueue: false, queueState: "idle" };
+  if (t === "MATCH_FOUND") return { joinedQueue: false, queueState: "matched" };
+
+  return s;
+}
+
 // PUBLIC_INTERFACE
 export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
   /**
    * Multiplayer Lobby screen:
    * - Shows WebSocket status using useWebSocketStatus()
    * - Allows Connect/Disconnect (mock-safe when REACT_APP_WS_URL unset; wsClient enters mock mode)
-   * - Join/Leave Queue
+   * - Join/Leave Queue with debounced actions
    * - Local matchmaking simulation in mock mode
    * - Real WS mode subscribes to minimal events: queue:joined, queue:left, match:found
    * - Ensures cleanup on unmount: timers + ws subscriptions + (optional) queue leave
@@ -60,11 +97,26 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
   const matchmakingTimerRef = useRef(null);
   const mountedRef = useRef(false);
 
-  const isConnected = ws.state === "open" || ws.state === "mock";
+  // Debounce join/leave to avoid rapid double-clicks and overlapping ops.
+  const pendingActionRef = useRef({ joinTimer: null, leaveTimer: null });
+  const lastActionAtRef = useRef(0);
+
+  // We show "reconnecting" when we were previously connected and now are in a hard disconnected/transient state.
+  const wasEverConnectedRef = useRef(false);
+
+  const isConnected = isWsConnectedState(ws.state);
   const isMockMode = Boolean(ws.isMock) || ws.state === "mock";
 
-  const connLabel = useMemo(() => mapConnStateToLabel(ws.state), [ws.state]);
-  const connTone = useMemo(() => mapConnStateToTone(ws.state), [ws.state]);
+  useEffect(() => {
+    if (isConnected) wasEverConnectedRef.current = true;
+  }, [isConnected]);
+
+  const isReconnecting = useMemo(() => {
+    return wasEverConnectedRef.current && (isWsTransientState(ws.state) || isWsHardDisconnected(ws.state)) && !isMockMode;
+  }, [isMockMode, ws.state]);
+
+  const connLabel = useMemo(() => mapConnStateToLabel(ws.state, isReconnecting), [isReconnecting, ws.state]);
+  const connTone = useMemo(() => mapConnStateToTone(ws.state, isReconnecting), [isReconnecting, ws.state]);
 
   // Initialize display name from profile when available.
   useEffect(() => {
@@ -75,6 +127,20 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
     setDisplayName((prev) => (safeTrim(prev) ? prev : n));
   }, [profileApi.profile?.name]);
 
+  const normalizedName = safeTrim(displayName) || "Guest";
+
+  const cancelPendingQueueActions = () => {
+    if (pendingActionRef.current.joinTimer) clearTimeout(pendingActionRef.current.joinTimer);
+    if (pendingActionRef.current.leaveTimer) clearTimeout(pendingActionRef.current.leaveTimer);
+    pendingActionRef.current.joinTimer = null;
+    pendingActionRef.current.leaveTimer = null;
+  };
+
+  const safeSetBusy = (busy) => {
+    if (!mountedRef.current) return;
+    setOpBusy(busy);
+  };
+
   // Subscribe to wsClient events (error + minimal app events).
   useEffect(() => {
     mountedRef.current = true;
@@ -83,6 +149,26 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
       const msg = safeTrim(payload?.message) || "WebSocket error";
       setLastError(msg);
       pushNotice(setNotices, { message: msg, tone: "bad" });
+    });
+
+    const offOpen = subscribe("open", (payload) => {
+      if (payload?.isMock) {
+        pushNotice(setNotices, { message: "Connected (mock).", tone: "neutral" });
+      } else {
+        pushNotice(setNotices, { message: "Connected.", tone: "good" });
+      }
+      setLastError(null);
+    });
+
+    const offClose = subscribe("close", (payload) => {
+      // Keep a short helpful notice; avoid spam by not pushing while explicitly disconnecting (hard to detect here),
+      // but generally it's useful for UI clarity.
+      const code = payload?.code;
+      const reason = safeTrim(payload?.reason);
+      pushNotice(setNotices, {
+        message: reason ? `Connection closed (${code ?? "?"}): ${reason}` : `Connection closed (${code ?? "?"}).`,
+        tone: "neutral"
+      });
     });
 
     const offQueueJoined = subscribe("queue:joined", (payload) => {
@@ -108,30 +194,39 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
     return () => {
       mountedRef.current = false;
 
+      cancelPendingQueueActions();
+
       // Cleanup timers
       if (matchmakingTimerRef.current) {
         clearTimeout(matchmakingTimerRef.current);
         matchmakingTimerRef.current = null;
       }
 
+      // Best-effort cleanup: if we were in real mode and in queue, try leaving.
+      // This is intentionally fire-and-forget.
+      if (joinedQueue && !isMockMode) {
+        try {
+          send({ event: "queue:left", data: { name: normalizedName } });
+        } catch {
+          // ignore
+        }
+      }
+
       // Cleanup listeners
       offError();
+      offOpen();
+      offClose();
       offQueueJoined();
       offQueueLeft();
       offMatchFound();
-
-      // Reset UI state so remount is clean
-      setNotices([]);
-      setLastError(null);
-      setOpBusy(false);
-      setJoinedQueue(false);
-      setQueueState("idle");
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // When disconnected, ensure local matchmaking state is not stuck.
   useEffect(() => {
     if (!isConnected) {
+      cancelPendingQueueActions();
       if (matchmakingTimerRef.current) {
         clearTimeout(matchmakingTimerRef.current);
         matchmakingTimerRef.current = null;
@@ -145,11 +240,9 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
   const canConnect = ws.state !== "open" && ws.state !== "mock" && ws.state !== "connecting";
   const canDisconnect = ws.state === "open" || ws.state === "mock" || ws.state === "connecting" || ws.state === "closing";
 
-  const normalizedName = safeTrim(displayName) || "Guest";
-
   const handleConnect = async () => {
     setLastError(null);
-    setOpBusy(true);
+    safeSetBusy(true);
     try {
       // Path is optional; keep blank unless backend expects /ws.
       connect({ path: "" });
@@ -160,16 +253,15 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
       });
     } finally {
       // We keep UI responsive and do not wait for open; status hook will update.
-      setTimeout(() => {
-        if (!mountedRef.current) return;
-        setOpBusy(false);
-      }, 150);
+      setTimeout(() => safeSetBusy(false), 150);
     }
   };
 
   const handleDisconnect = async () => {
-    setOpBusy(true);
+    safeSetBusy(true);
     try {
+      cancelPendingQueueActions();
+
       // Best-effort leave queue before disconnect (for real backend), but don't block UI if it fails.
       if (joinedQueue && !isMockMode) {
         send({ event: "queue:left", data: { name: normalizedName } });
@@ -185,10 +277,7 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
       disconnect();
       pushNotice(setNotices, { message: "Disconnected.", tone: "neutral" });
     } finally {
-      setTimeout(() => {
-        if (!mountedRef.current) return;
-        setOpBusy(false);
-      }, 150);
+      setTimeout(() => safeSetBusy(false), 150);
     }
   };
 
@@ -196,14 +285,44 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
     // Simulate a short matchmaking delay then match vs bot.
     if (matchmakingTimerRef.current) clearTimeout(matchmakingTimerRef.current);
 
+    // Make mock delay stable-but-varied per user name to feel deterministic.
+    const seed = normalizedName.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    const delay = clampMs(1100 + (seed % 700), 900, 2200);
+
     matchmakingTimerRef.current = setTimeout(() => {
       matchmakingTimerRef.current = null;
       if (!mountedRef.current) return;
 
-      setQueueState("matched");
-      setJoinedQueue(false);
+      const next = __reduceLobbyState({ joinedQueue, queueState }, { type: "MATCH_FOUND" });
+      setQueueState(next.queueState);
+      setJoinedQueue(next.joinedQueue);
+
       pushNotice(setNotices, { message: "Matched vs. Bot (local simulation).", tone: "good" });
-    }, 1400);
+    }, delay);
+  };
+
+  const enqueueDebounced = (kind, fn) => {
+    const DEBOUNCE_MS = 250;
+
+    const now = Date.now();
+    const since = now - lastActionAtRef.current;
+    lastActionAtRef.current = now;
+
+    // If the user is tapping very quickly, we still debounce to last intent.
+    const wait = since < 150 ? DEBOUNCE_MS : 0;
+
+    cancelPendingQueueActions();
+    safeSetBusy(true);
+
+    const timer = setTimeout(() => {
+      if (!mountedRef.current) return;
+      fn();
+      // Give UI a beat to reflect state; then clear busy.
+      setTimeout(() => safeSetBusy(false), 150);
+    }, wait);
+
+    if (kind === "join") pendingActionRef.current.joinTimer = timer;
+    if (kind === "leave") pendingActionRef.current.leaveTimer = timer;
   };
 
   const handleJoinQueue = async () => {
@@ -211,13 +330,18 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
       pushNotice(setNotices, { message: "Connect first to join the queue.", tone: "warn" });
       return;
     }
+    if (queueState === "matched") {
+      pushNotice(setNotices, { message: "Already matched. Start the match or leave queue.", tone: "warn" });
+      return;
+    }
+    if (joinedQueue || queueState === "searching") return;
 
-    setOpBusy(true);
-    setLastError(null);
+    enqueueDebounced("join", () => {
+      setLastError(null);
 
-    try {
-      setJoinedQueue(true);
-      setQueueState("searching");
+      const next = __reduceLobbyState({ joinedQueue, queueState }, { type: "JOIN_REQUESTED" });
+      setJoinedQueue(next.joinedQueue);
+      setQueueState(next.queueState);
 
       if (isMockMode) {
         pushNotice(setNotices, { message: `Joined queue as ${normalizedName}.`, tone: "good" });
@@ -228,35 +352,28 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
       // Real backend: send minimal join message; server is expected to emit queue:joined etc.
       send({ event: "queue:join", data: { name: normalizedName } });
       pushNotice(setNotices, { message: "Join request sent.", tone: "neutral" });
-    } finally {
-      setTimeout(() => {
-        if (!mountedRef.current) return;
-        setOpBusy(false);
-      }, 150);
-    }
+    });
   };
 
   const handleLeaveQueue = async () => {
-    setOpBusy(true);
-    try {
+    if (!joinedQueue && queueState !== "searching") return;
+
+    enqueueDebounced("leave", () => {
       if (matchmakingTimerRef.current) {
         clearTimeout(matchmakingTimerRef.current);
         matchmakingTimerRef.current = null;
       }
-      setJoinedQueue(false);
-      setQueueState("idle");
+
+      const next = __reduceLobbyState({ joinedQueue, queueState }, { type: "LEAVE_REQUESTED" });
+      setJoinedQueue(next.joinedQueue);
+      setQueueState(next.queueState);
 
       if (!isMockMode) {
         send({ event: "queue:left", data: { name: normalizedName } });
       }
 
       pushNotice(setNotices, { message: "Left queue.", tone: "neutral" });
-    } finally {
-      setTimeout(() => {
-        if (!mountedRef.current) return;
-        setOpBusy(false);
-      }, 150);
-    }
+    });
   };
 
   const handleStartMatch = () => {
@@ -288,7 +405,13 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
   }, [connTone]);
 
   const queueText =
-    queueState === "matched" ? "Matched" : queueState === "searching" ? "Searching…" : joinedQueue ? "In queue" : "Not in queue";
+    queueState === "matched"
+      ? "Matched"
+      : queueState === "searching"
+        ? "Searching…"
+        : joinedQueue
+          ? "In queue"
+          : "Not in queue";
 
   const joinDisabled = opBusy || !isConnected || queueState === "searching" || queueState === "matched";
   const leaveDisabled = opBusy || (!joinedQueue && queueState !== "searching");
@@ -315,7 +438,11 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
                   className="resultItem"
                   style={{
                     borderLeft: `4px solid ${
-                      n.tone === "good" ? "rgba(46, 204, 113, 0.9)" : n.tone === "bad" ? "rgba(231, 76, 60, 0.9)" : "rgba(255,255,255,0.25)"
+                      n.tone === "good"
+                        ? "rgba(46, 204, 113, 0.9)"
+                        : n.tone === "bad"
+                          ? "rgba(231, 76, 60, 0.9)"
+                          : "rgba(255,255,255,0.25)"
                     }`
                   }}
                 >
@@ -352,6 +479,11 @@ export default function MultiplayerScreen({ onBackHome, onStartMatch }) {
             <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
               Outbound queued: <strong>{ws.queued ?? 0}</strong>
             </div>
+            {isReconnecting ? (
+              <div className="muted" style={{ fontSize: 12, marginTop: 10 }} role="status">
+                Status: <span style={{ color: "rgba(255, 235, 160, 0.95)" }}>Attempting to reconnect…</span>
+              </div>
+            ) : null}
             {lastError ? (
               <div className="muted" style={{ fontSize: 12, marginTop: 10 }} role="status">
                 Last error: <span style={{ color: "rgba(255, 180, 170, 0.95)" }}>{lastError}</span>
