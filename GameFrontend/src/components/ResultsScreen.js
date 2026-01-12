@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { apiClient } from "../api/restClient";
 
 function formatMs(ms) {
   const s = Math.floor(ms / 1000);
@@ -10,6 +11,88 @@ function formatMs(ms) {
 // PUBLIC_INTERFACE
 export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
   /** Results screen: shows score and duration, offers play again. */
+
+  const score = results?.score ?? 0;
+
+  const defaultName = useMemo(() => {
+    // Keep it deterministic and UI-friendly. Real profile/auth will replace this later.
+    const n = score > 0 ? "Player" : "Anonymous";
+    return n;
+  }, [score]);
+
+  const [profile, setProfile] = useState(null);
+  const [submitState, setSubmitState] = useState(() => ({
+    loading: false,
+    done: false,
+    isMock: false,
+    message: ""
+  }));
+
+  // Demonstrate profile call without requiring auth; will return mock profile offline.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const p = await apiClient.getProfile();
+        if (cancelled) return;
+        setProfile(p);
+      } catch (e) {
+        if (cancelled) return;
+        setProfile(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Best-effort submit score once per results screen mount.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      // Avoid spamming submissions for empty/zero scores.
+      if (!Number.isFinite(score) || score <= 0) {
+        setSubmitState({ loading: false, done: true, isMock: true, message: "Score not submitted (0)." });
+        return;
+      }
+
+      setSubmitState({ loading: true, done: false, isMock: false, message: "Submitting score…" });
+
+      const name = (profile && typeof profile.name === "string" && profile.name) || defaultName;
+
+      try {
+        const res = await apiClient.submitScore({ name, score });
+
+        if (cancelled) return;
+
+        // If the client returned an ApiError (ok:false), treat as offline submit.
+        if (res && res.ok === false) {
+          setSubmitState({
+            loading: false,
+            done: true,
+            isMock: Boolean(res.isMock),
+            message: res.isMock ? "Offline: score not persisted (mock mode)." : `Submit failed: ${res.message || "Error"}`
+          });
+          return;
+        }
+
+        setSubmitState({ loading: false, done: true, isMock: false, message: "Score submitted." });
+      } catch (e) {
+        if (cancelled) return;
+        setSubmitState({ loading: false, done: true, isMock: true, message: "Offline: score not persisted (mock mode)." });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [defaultName, profile, score]);
+
+  const profileLabel = profile?.isMock ? "Offline Profile (mock)" : profile ? "Profile" : "Profile (unavailable)";
+
   return (
     <div className="screen">
       <div className="card">
@@ -19,11 +102,26 @@ export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
         <div className="resultsGrid" aria-label="Game results">
           <div className="resultItem">
             <div className="resultLabel">Score</div>
-            <div className="resultValue">{results?.score ?? 0}</div>
+            <div className="resultValue">{score}</div>
           </div>
           <div className="resultItem">
             <div className="resultLabel">Time</div>
             <div className="resultValue">{formatMs(results?.elapsedMs ?? 0)}</div>
+          </div>
+
+          <div className="resultItem">
+            <div className="resultLabel">{profileLabel}</div>
+            <div className="resultValue" style={{ fontSize: 18 }}>
+              {profile?.name || "—"}
+            </div>
+          </div>
+
+          <div className="resultItem">
+            <div className="resultLabel">Score Submit</div>
+            <div className="resultValue" style={{ fontSize: 18 }}>
+              {submitState.loading ? "Submitting…" : submitState.message || "—"}
+              {submitState.isMock ? <span className="muted"> (mock)</span> : null}
+            </div>
           </div>
         </div>
 
@@ -37,7 +135,9 @@ export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
         </div>
 
         <div className="finePrint">
-          <p>No backend calls are made yet; this is graceful offline mode.</p>
+          <p className="muted">
+            Online features are best-effort: GETs retry automatically; offline mode uses stubs (with <code>isMock</code> flags).
+          </p>
         </div>
       </div>
     </div>

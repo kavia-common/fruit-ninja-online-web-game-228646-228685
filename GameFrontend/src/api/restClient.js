@@ -1,18 +1,18 @@
 /**
  * REST API client for the Fruit Ninja Online frontend.
  *
- * Goals:
- * - Reads API base URL from env (REACT_APP_API_BASE or REACT_APP_BACKEND_URL).
- * - Provides high-level methods (healthCheck, getTopScores, submitScore, getProfile, updateProfile).
- * - Robust error handling (timeouts, JSON parsing, HTTP errors).
- * - Retries for idempotent GET requests.
- * - Graceful degradation: if backend is missing/unreachable, return mocked data
- *   (or a clear error object for non-idempotent operations like submitScore).
+ * Requirements for step 01.04:
+ * - Expose: health(), getTopScores(), submitScore(payload), getProfile(), updateProfile(payload)
+ * - Use REACT_APP_API_BASE (preferred) or REACT_APP_BACKEND_URL (fallback) for base URL
+ * - Include timeouts, retries (idempotent GETs only), and clear error objects
+ * - Mock-friendly behavior when env vars are missing or network fails:
+ *   - return sensible stub data and set an `isMock` flag on returned objects where feasible
+ *   - do not break UI if backend is offline
  */
 
 /**
  * @typedef {Object} ApiError
- * @property {true} ok Always false for errors; provided for ergonomic branching
+ * @property {false} ok Always false for errors; provided for ergonomic branching
  * @property {string} name Machine-readable error name
  * @property {string} message Human-readable message
  * @property {number|null} status HTTP status if available
@@ -20,17 +20,19 @@
  * @property {string|null} method HTTP method
  * @property {boolean} isNetwork True if request failed due to network/connection issues
  * @property {boolean} isTimeout True if request timed out
+ * @property {boolean} isMock True if this error is generated in offline/mock mode
  * @property {any|null} details Optional extra details (e.g., response body, parse error)
  */
 
 /**
- * @typedef {Object} HealthCheckResult
+ * @typedef {Object} HealthResult
  * @property {boolean} ok
  * @property {"remote"|"offline"} mode
  * @property {string|null} baseUrl
  * @property {number} latencyMs
  * @property {string|null} message
  * @property {ApiError|null} error
+ * @property {boolean} isMock
  */
 
 /**
@@ -38,6 +40,16 @@
  * @property {string} name
  * @property {number} score
  * @property {string} [createdAt]
+ * @property {boolean} [isMock]
+ */
+
+/**
+ * @typedef {Object} Profile
+ * @property {string} id
+ * @property {string} name
+ * @property {string|null} avatar
+ * @property {any} [preferences]
+ * @property {boolean} [isMock]
  */
 
 const DEFAULT_TIMEOUT_MS = 6500;
@@ -57,9 +69,9 @@ function joinUrl(baseUrl, path) {
 
 function getApiBaseUrlFromEnv() {
   // CRA exposes env vars at build time through process.env.REACT_APP_*
-  const a = safeTrim(process.env.REACT_APP_API_BASE);
-  const b = safeTrim(process.env.REACT_APP_BACKEND_URL);
-  const raw = a || b;
+  const preferred = safeTrim(process.env.REACT_APP_API_BASE);
+  const fallback = safeTrim(process.env.REACT_APP_BACKEND_URL);
+  const raw = preferred || fallback;
   return raw.replace(/\/+$/, "");
 }
 
@@ -86,6 +98,7 @@ function makeApiError(partial) {
     method: typeof partial?.method === "string" ? partial.method : null,
     isNetwork: Boolean(partial?.isNetwork),
     isTimeout: Boolean(partial?.isTimeout),
+    isMock: Boolean(partial?.isMock),
     details: partial?.details ?? null
   };
   return err;
@@ -95,12 +108,11 @@ async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function fetchWithTimeout(url, options, timeoutMs) {
+async function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...options, signal: ctrl.signal });
-    return res;
+    return await fetchImpl(url, { ...options, signal: ctrl.signal });
   } finally {
     clearTimeout(id);
   }
@@ -125,10 +137,11 @@ async function parseResponseBody(res) {
 }
 
 /**
- * Low-level request helper. Returns `{ ok: true, data, status }` or `{ ok: false, ...ApiError }`.
+ * Low-level request helper.
+ * Returns `{ ok: true, data, status }` or an ApiError (`{ ok: false, ... }`).
  * Retries only for GET requests (idempotent) by default.
  */
-async function requestJson(path, options = {}) {
+async function requestJson(fetchImpl, path, options = {}) {
   const baseUrl = getApiBaseUrlFromEnv();
   const url = joinUrl(baseUrl, path);
 
@@ -139,13 +152,13 @@ async function requestJson(path, options = {}) {
   if (!baseUrl) {
     return makeApiError({
       name: "BackendNotConfigured",
-      message:
-        "Backend URL not configured. Set REACT_APP_API_BASE or REACT_APP_BACKEND_URL to enable online features.",
+      message: "Backend URL not configured. Set REACT_APP_API_BASE or REACT_APP_BACKEND_URL to enable online features.",
       status: null,
       url: null,
       method,
       isNetwork: true,
       isTimeout: false,
+      isMock: true,
       details: { missingEnv: ["REACT_APP_API_BASE", "REACT_APP_BACKEND_URL"] }
     });
   }
@@ -171,11 +184,11 @@ async function requestJson(path, options = {}) {
         : 0;
 
   let attempt = 0;
-  let lastErr = null;
 
   while (attempt <= maxRetries) {
     try {
       const res = await fetchWithTimeout(
+        fetchImpl,
         url,
         {
           method,
@@ -189,7 +202,6 @@ async function requestJson(path, options = {}) {
       const parsed = await parseResponseBody(res);
 
       if (!res.ok) {
-        // Normalize error information.
         return makeApiError({
           name: "HttpError",
           message: `HTTP ${res.status} ${res.statusText || ""}`.trim(),
@@ -198,6 +210,7 @@ async function requestJson(path, options = {}) {
           method,
           isNetwork: false,
           isTimeout: false,
+          isMock: false,
           details: parsed
         });
       }
@@ -208,18 +221,17 @@ async function requestJson(path, options = {}) {
         data: parsed
       };
     } catch (e) {
-      // AbortError is our timeout path (or an explicit abort elsewhere).
       const isAbort = e && typeof e === "object" && String(e.name) === "AbortError";
-      lastErr = makeApiError({
+
+      const err = makeApiError({
         name: isAbort ? "TimeoutError" : "NetworkError",
-        message: isAbort
-          ? `Request timed out after ${timeoutMs}ms`
-          : "Network error while contacting backend",
+        message: isAbort ? `Request timed out after ${timeoutMs}ms` : "Network error while contacting backend",
         status: null,
         url,
         method,
         isNetwork: true,
         isTimeout: isAbort,
+        isMock: false,
         details: { error: String(e) }
       });
 
@@ -230,12 +242,13 @@ async function requestJson(path, options = {}) {
         attempt += 1;
         continue;
       }
-      return lastErr;
+
+      return err;
     }
   }
 
   // Should not happen, but keep a safe fallback.
-  return lastErr || makeApiError({ name: "UnknownError", message: "Unknown request failure", url, method });
+  return makeApiError({ name: "UnknownError", message: "Unknown request failure", url, method, isMock: false });
 }
 
 // ---------- Mock/offline data helpers ----------
@@ -243,21 +256,28 @@ async function requestJson(path, options = {}) {
 function makeMockScores() {
   /** @type {ScoreRow[]} */
   return [
-    { name: "You (Offline)", score: 12, createdAt: new Date().toISOString() },
-    { name: "Swift Slicer", score: 20, createdAt: new Date(Date.now() - 86400000).toISOString() },
-    { name: "Fruit Fan", score: 16, createdAt: new Date(Date.now() - 3600000).toISOString() }
+    { name: "You (Offline)", score: 12, createdAt: new Date().toISOString(), isMock: true },
+    { name: "Swift Slicer", score: 20, createdAt: new Date(Date.now() - 86400000).toISOString(), isMock: true },
+    { name: "Fruit Fan", score: 16, createdAt: new Date(Date.now() - 3600000).toISOString(), isMock: true }
   ].sort((a, b) => b.score - a.score);
 }
 
 function makeMockProfile() {
+  /** @type {Profile} */
   return {
     id: "offline",
     name: "Offline Player",
     avatar: null,
-    preferences: {
-      theme: "dark"
-    }
+    preferences: { theme: "dark" },
+    isMock: true
   };
+}
+
+function normalizeScoresPayload(data) {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.scores)) return data.scores;
+  if (data && Array.isArray(data.topScores)) return data.topScores;
+  return data;
 }
 
 // ---------- High-level API surface ----------
@@ -268,147 +288,29 @@ function makeMockProfile() {
  */
 export function createRestApiClient({ fetchImpl } = {}) {
   /** Create a REST API client (optionally inject fetch for tests). */
-  if (fetchImpl && typeof fetchImpl === "function") {
-    // Swap global fetch used in requestJson helpers by temporarily shadowing.
-    // We do this by binding a private wrapper that uses fetchImpl.
-    // Keeping this lightweight avoids adding dependencies.
-    const _fetch = fetchImpl;
+  const effectiveFetch = typeof fetchImpl === "function" ? fetchImpl : fetch;
 
-    // Local copies of helpers that use injected fetch.
-    async function _fetchWithTimeout(url, options, timeoutMs) {
-      const ctrl = new AbortController();
-      const id = setTimeout(() => ctrl.abort(), timeoutMs);
-      try {
-        return await _fetch(url, { ...options, signal: ctrl.signal });
-      } finally {
-        clearTimeout(id);
-      }
-    }
-
-    async function _requestJson(path, options = {}) {
-      const baseUrl = getApiBaseUrlFromEnv();
-      const url = joinUrl(baseUrl, path);
-
-      const method = (options.method || "GET").toUpperCase();
-      const timeoutMs = typeof options.timeoutMs === "number" ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
-
-      if (!baseUrl) {
-        return makeApiError({
-          name: "BackendNotConfigured",
-          message:
-            "Backend URL not configured. Set REACT_APP_API_BASE or REACT_APP_BACKEND_URL to enable online features.",
-          status: null,
-          url: null,
-          method,
-          isNetwork: true,
-          isTimeout: false,
-          details: { missingEnv: ["REACT_APP_API_BASE", "REACT_APP_BACKEND_URL"] }
-        });
-      }
-
-      const headers = {
-        Accept: "application/json",
-        ...(options.headers || {})
-      };
-
-      const hasBody = options.body !== undefined && options.body !== null;
-      const body =
-        hasBody && typeof options.body !== "string"
-          ? JSON.stringify(options.body)
-          : hasBody
-            ? options.body
-            : undefined;
-
-      if (
-        hasBody &&
-        typeof headers["Content-Type"] === "undefined" &&
-        typeof headers["content-type"] === "undefined"
-      ) {
-        headers["Content-Type"] = "application/json";
-      }
-
-      const maxRetries =
-        typeof options.retries === "number"
-          ? options.retries
-          : method === "GET"
-            ? DEFAULT_GET_RETRIES
-            : 0;
-
-      let attempt = 0;
-
-      while (attempt <= maxRetries) {
-        try {
-          const res = await _fetchWithTimeout(
-            url,
-            { method, headers, body, credentials: "omit" },
-            timeoutMs
-          );
-          const parsed = await parseResponseBody(res);
-
-          if (!res.ok) {
-            return makeApiError({
-              name: "HttpError",
-              message: `HTTP ${res.status} ${res.statusText || ""}`.trim(),
-              status: res.status,
-              url,
-              method,
-              isNetwork: false,
-              isTimeout: false,
-              details: parsed
-            });
-          }
-
-          return { ok: true, status: res.status, data: parsed };
-        } catch (e) {
-          const isAbort = e && typeof e === "object" && String(e.name) === "AbortError";
-          const err = makeApiError({
-            name: isAbort ? "TimeoutError" : "NetworkError",
-            message: isAbort
-              ? `Request timed out after ${timeoutMs}ms`
-              : "Network error while contacting backend",
-            status: null,
-            url,
-            method,
-            isNetwork: true,
-            isTimeout: isAbort,
-            details: { error: String(e) }
-          });
-
-          if (method === "GET" && attempt < maxRetries) {
-            await sleep(250 * Math.pow(2, attempt));
-            attempt += 1;
-            continue;
-          }
-          return err;
-        }
-      }
-
-      return makeApiError({ name: "UnknownError", message: "Unknown request failure", url, method });
-    }
-
-    return buildHighLevelApi(_requestJson);
-  }
-
-  return buildHighLevelApi(requestJson);
+  return buildHighLevelApi((path, options) => requestJson(effectiveFetch, path, options));
 }
 
 function buildHighLevelApi(_requestJson) {
   return {
     // PUBLIC_INTERFACE
-    async healthCheck() {
+    async health() {
       /** Check whether backend is reachable. Returns a structured result with mode + latency. */
       const baseUrl = getApiBaseUrlFromEnv();
       const t0 = performance.now();
 
-      // If not configured, this is an "offline mode" success (the UI can still function).
+      // Not configured: treat as offline mock mode (UI should still function).
       if (!baseUrl) {
-        return /** @type {HealthCheckResult} */ ({
+        return /** @type {HealthResult} */ ({
           ok: true,
           mode: "offline",
           baseUrl: null,
           latencyMs: 0,
           message: "Offline mode: backend URL not configured.",
-          error: null
+          error: null,
+          isMock: true
         });
       }
 
@@ -416,103 +318,108 @@ function buildHighLevelApi(_requestJson) {
       const latencyMs = Math.max(0, Math.round(performance.now() - t0));
 
       if (res && res.ok) {
-        return /** @type {HealthCheckResult} */ ({
+        return /** @type {HealthResult} */ ({
           ok: true,
           mode: "remote",
           baseUrl,
           latencyMs,
           message: "Backend reachable",
-          error: null
+          error: null,
+          isMock: false
         });
       }
 
-      // Backend exists but is down/unreachable — still return ok:false but with structured error.
-      return /** @type {HealthCheckResult} */ ({
+      // Backend configured but down/unreachable — return ok:false but structured.
+      return /** @type {HealthResult} */ ({
         ok: false,
         mode: "offline",
         baseUrl,
         latencyMs,
-        message: "Backend unreachable; continuing in solo mode.",
-        error: res
+        message: "Backend unreachable; continuing in offline mode.",
+        error: res,
+        isMock: false
       });
     },
 
     // PUBLIC_INTERFACE
     async getTopScores() {
-      /** Get leaderboard scores (mocked fallback on failure). */
+      /** Get leaderboard scores (mock fallback on failure). */
       const res = await _requestJson("/scores/top", { method: "GET" });
 
       if (res && res.ok) {
-        // Expect API returns array (but tolerate different shapes)
-        if (Array.isArray(res.data)) return res.data;
-        if (res.data && Array.isArray(res.data.scores)) return res.data.scores;
-        return res.data;
+        const normalized = normalizeScoresPayload(res.data);
+        return normalized;
       }
 
-      // Graceful degradation: return mocked leaderboard.
+      // Graceful degradation: return mocked leaderboard, but keep a consistent shape.
       return makeMockScores();
     },
 
     // PUBLIC_INTERFACE
-    async submitScore({ name, score }) {
-      /** Submit a score. If backend is missing, return a clear error object (cannot truly persist). */
-      const payload = {
-        name: safeTrim(name) || "Anonymous",
-        score: Number.isFinite(score) ? score : 0
+    async submitScore(payload) {
+      /**
+       * Submit a score.
+       * Offline/mock behavior:
+       * - if backend is not configured or fails, return an error object with `isMock: true` and include echoed payload
+       *   so UI can still show "what would have been submitted".
+       */
+      const safePayload = {
+        name: safeTrim(payload?.name) || "Anonymous",
+        score: Number.isFinite(payload?.score) ? payload.score : 0
       };
 
-      const res = await _requestJson("/scores", { method: "POST", body: payload, retries: 0 });
+      const res = await _requestJson("/scores", { method: "POST", body: safePayload, retries: 0 });
 
       if (res && res.ok) return res.data;
 
       // Non-idempotent; do not pretend it succeeded. Return a consistent error object.
-      return (
-        res ||
-        makeApiError({
-          name: "SubmitFailed",
-          message: "Failed to submit score (offline mode).",
-          status: null,
-          url: null,
-          method: "POST",
-          isNetwork: true,
-          isTimeout: false,
-          details: { payload }
-        })
-      );
+      const baseUrl = getApiBaseUrlFromEnv();
+      return makeApiError({
+        name: res?.name || "SubmitFailed",
+        message: res?.message || "Failed to submit score (offline mode).",
+        status: res?.status ?? null,
+        url: res?.url ?? (baseUrl ? joinUrl(baseUrl, "/scores") : null),
+        method: "POST",
+        isNetwork: Boolean(res?.isNetwork ?? true),
+        isTimeout: Boolean(res?.isTimeout ?? false),
+        isMock: !baseUrl || res?.name === "BackendNotConfigured",
+        details: { payload: safePayload, upstream: res?.details ?? res ?? null }
+      });
     },
 
     // PUBLIC_INTERFACE
     async getProfile() {
-      /** Get current user profile (mocked fallback on failure). */
+      /** Get current user profile (mock fallback on failure). */
       const res = await _requestJson("/profile", { method: "GET" });
 
-      if (res && res.ok) return res.data;
+      if (res && res.ok) {
+        // Ensure we always return an object.
+        if (res.data && typeof res.data === "object") return { ...res.data, isMock: false };
+        return { profile: res.data, isMock: false };
+      }
 
       return makeMockProfile();
     },
 
     // PUBLIC_INTERFACE
-    async updateProfile(data) {
-      /** Update current user profile. If backend is missing/unreachable, return a clear error object. */
-      const payload = data && typeof data === "object" ? data : {};
+    async updateProfile(payload) {
+      /**
+       * Update current user profile.
+       * Offline/mock behavior:
+       * - if backend fails, return a mock profile merged with payload and `isMock: true`
+       */
+      const safePayload = payload && typeof payload === "object" ? payload : {};
 
-      const res = await _requestJson("/profile", { method: "PUT", body: payload, retries: 0 });
+      const res = await _requestJson("/profile", { method: "PUT", body: safePayload, retries: 0 });
 
-      if (res && res.ok) return res.data;
+      if (res && res.ok) {
+        if (res.data && typeof res.data === "object") return { ...res.data, isMock: false };
+        return { updated: res.data, isMock: false };
+      }
 
-      return (
-        res ||
-        makeApiError({
-          name: "UpdateFailed",
-          message: "Failed to update profile (offline mode).",
-          status: null,
-          url: null,
-          method: "PUT",
-          isNetwork: true,
-          isTimeout: false,
-          details: { payload }
-        })
-      );
+      // Mock-friendly: return a local merged profile rather than only an error.
+      const offline = makeMockProfile();
+      return { ...offline, ...(safePayload || {}), isMock: true };
     },
 
     // PUBLIC_INTERFACE
@@ -528,3 +435,37 @@ function buildHighLevelApi(_requestJson) {
  * Keep it simple now; tests can use createRestApiClient({ fetchImpl }).
  */
 export const apiClient = createRestApiClient();
+
+/**
+ * Back-compat aliases (existing code used healthCheck()).
+ * Keeping these ensures we don't break existing imports while step 01.04 requires `health()`.
+ */
+// PUBLIC_INTERFACE
+export function healthCheck() {
+  /** Backwards compatible health check alias. */
+  return apiClient.health();
+}
+
+// PUBLIC_INTERFACE
+export function getTopScores() {
+  /** Backwards compatible shortcut for singleton client. */
+  return apiClient.getTopScores();
+}
+
+// PUBLIC_INTERFACE
+export function submitScore(payload) {
+  /** Backwards compatible shortcut for singleton client. */
+  return apiClient.submitScore(payload);
+}
+
+// PUBLIC_INTERFACE
+export function getProfile() {
+  /** Backwards compatible shortcut for singleton client. */
+  return apiClient.getProfile();
+}
+
+// PUBLIC_INTERFACE
+export function updateProfile(payload) {
+  /** Backwards compatible shortcut for singleton client. */
+  return apiClient.updateProfile(payload);
+}

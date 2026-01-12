@@ -9,7 +9,7 @@ import { apiClient } from "./restClient";
  */
 export async function runHealthCheck() {
   /** Run a one-shot health check (for screens/utilities). */
-  return apiClient.healthCheck();
+  return apiClient.health();
 }
 
 /**
@@ -32,7 +32,7 @@ export function useBackendHealth(options = {}) {
     return async () => {
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
-        const result = await apiClient.healthCheck();
+        const result = await apiClient.health();
         setState({ loading: false, result, error: result && result.ok ? null : result?.error || null });
         return result;
       } catch (e) {
