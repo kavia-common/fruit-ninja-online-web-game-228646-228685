@@ -3,22 +3,34 @@
   /* Light theme colors */
   --bg-primary: #ffffff;
   --bg-secondary: #f8f9fa;
-  --text-primary: #282c34;
-  --text-secondary: #61dafb;
-  --border-color: #e9ecef;
-  --button-bg: #007bff;
+  --text-primary: #111827;
+  --text-secondary: #2563eb;
+  --border-color: #e5e7eb;
+  --button-bg: #2563eb;
   --button-text: #ffffff;
+
+  --card-bg: rgba(255, 255, 255, 0.85);
+  --card-border: rgba(0, 0, 0, 0.08);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
 }
 
 [data-theme="dark"] {
   /* Dark theme colors */
-  --bg-primary: #1a1a1a;
-  --bg-secondary: #282c34;
+  --bg-primary: #0b1020;
+  --bg-secondary: #111827;
   --text-primary: #ffffff;
-  --text-secondary: #61dafb;
-  --border-color: #404040;
-  --button-bg: #0056b3;
+  --text-secondary: #60a5fa;
+  --border-color: rgba(255, 255, 255, 0.14);
+  --button-bg: #2563eb;
   --button-text: #ffffff;
+
+  --card-bg: rgba(17, 24, 39, 0.72);
+  --card-border: rgba(255, 255, 255, 0.12);
+  --shadow: 0 16px 50px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
 }
 
 .App {
@@ -26,79 +38,303 @@
   background-color: var(--bg-primary);
   color: var(--text-primary);
   min-height: 100vh;
-  transition: background-color 0.3s ease, color 0.3s ease;
-}
-
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: var(--bg-secondary);
-  min-height: 100vh;
+  transition: background-color 0.2s ease, color 0.2s ease;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: var(--text-primary);
-  transition: background-color 0.3s ease;
-  position: relative;
 }
 
-.App-link {
-  color: var(--text-secondary);
-  transition: color 0.3s ease;
+.appHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.20), rgba(0, 0, 0, 0.0));
+  border-bottom: 1px solid var(--border-color);
+}
+
+.brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.brandMark {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb, #60a5fa);
+  color: white;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  letter-spacing: 0.5px;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
+}
+
+.brandText {
+  text-align: left;
+  line-height: 1.1;
+}
+
+.brandTitle {
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.brandSub {
+  font-size: 12px;
+  opacity: 0.72;
 }
 
 .theme-toggle {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  background-color: var(--button-bg);
-  color: var(--button-text);
-  border: none;
-  border-radius: 8px;
-  padding: 10px 20px;
-  font-size: 14px;
-  font-weight: 600;
+  background-color: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.15s ease;
 }
 
 .theme-toggle:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-  opacity: 0.9;
+  transform: translateY(-1px);
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
-.theme-toggle:active {
-  transform: translateY(0);
+.appMain {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  padding: 16px;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.appFooter {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-color);
+  font-size: 12px;
+  opacity: 0.85;
 }
 
-/* Responsive design for mobile */
+.muted {
+  opacity: 0.75;
+}
+
+/* Generic screens/cards */
+.screen {
+  width: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.card {
+  width: min(720px, 100%);
+  border-radius: 16px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  padding: 22px;
+  backdrop-filter: blur(10px);
+}
+
+.title {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.4px;
+}
+
+.subtitle {
+  margin: 10px 0 0;
+  opacity: 0.82;
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.finePrint {
+  margin-top: 16px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+/* Buttons */
+.btn {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease, background-color 0.15s ease;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0px);
+  opacity: 0.92;
+}
+
+.btn-large {
+  padding: 12px 18px;
+  font-size: 14px;
+}
+
+.btn-primary {
+  background: var(--button-bg);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--button-text);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Game layout */
+.gameRoot {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gameTopBar {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: center;
+
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.gameStat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 90px;
+}
+
+.gameStatLabel {
+  font-size: 11px;
+  opacity: 0.7;
+  font-weight: 700;
+}
+
+.gameStatValue {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: -0.2px;
+}
+
+.gameTopActions {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+}
+
+.gameCanvasShell {
+  position: relative;
+  width: 100%;
+  height: min(72vh, 640px);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: var(--shadow);
+}
+
+.gameCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none; /* for touch swipes */
+}
+
+.gameOverlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.gameOverlayCard {
+  width: min(520px, 92%);
+  border-radius: 16px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+
+.gameOverlayTitle {
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.gameOverlaySub {
+  margin-top: 8px;
+  opacity: 0.8;
+  line-height: 1.5;
+  font-size: 13px;
+}
+
+.debugNote {
+  font-size: 12px;
+  opacity: 0.7;
+  text-align: left;
+}
+
+/* Results */
+.resultsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.resultItem {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.resultLabel {
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.7;
+}
+
+.resultValue {
+  font-size: 22px;
+  font-weight: 900;
+  margin-top: 6px;
+}
+
 @media (max-width: 768px) {
-  .theme-toggle {
-    top: 10px;
-    right: 10px;
-    padding: 8px 16px;
-    font-size: 12px;
+  .appMain {
+    padding: 12px;
+  }
+  .card {
+    padding: 18px;
+  }
+  .resultsGrid {
+    grid-template-columns: 1fr;
   }
 }

@@ -1,47 +1,84 @@
-import React, { useState, useEffect } from 'react';
-import logo from './logo.svg';
-import './App.css';
+import React, { useEffect, useMemo, useState } from "react";
+import "./App.css";
+import Game from "./components/Game";
+import HomeScreen from "./components/HomeScreen";
+import ResultsScreen from "./components/ResultsScreen";
+
+const SCREEN = Object.freeze({
+  HOME: "home",
+  GAME: "game",
+  RESULTS: "results"
+});
 
 // PUBLIC_INTERFACE
 function App() {
-  const [theme, setTheme] = useState('light');
+  /** App root: theme + simple screen navigation for Solo flow (no backend calls). */
+  const [theme, setTheme] = useState("dark");
+  const [screen, setScreen] = useState(SCREEN.HOME);
+  const [results, setResults] = useState(null);
+
+  const debugEnabled = useMemo(() => {
+    return String(process.env.REACT_APP_NODE_ENV || "").toLowerCase() === "development";
+  }, []);
 
   // Effect to apply theme to document element
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
   // PUBLIC_INTERFACE
   const toggleTheme = () => {
-    setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
+    /** Toggle light/dark theme. */
+    setTheme((prevTheme) => (prevTheme === "light" ? "dark" : "light"));
+  };
+
+  const handleStartSolo = () => {
+    setResults(null);
+    setScreen(SCREEN.GAME);
+  };
+
+  const handleGameOver = (payload) => {
+    setResults(payload);
+    setScreen(SCREEN.RESULTS);
   };
 
   return (
     <div className="App">
-      <header className="App-header">
-        <button 
-          className="theme-toggle" 
-          onClick={toggleTheme}
-          aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-        >
-          {theme === 'light' ? '🌙 Dark' : '☀️ Light'}
+      <header className="appHeader">
+        <div className="brand">
+          <div className="brandMark" aria-hidden="true">
+            FN
+          </div>
+          <div className="brandText">
+            <div className="brandTitle">Fruit Ninja Online</div>
+            <div className="brandSub">
+              {debugEnabled ? "Local debug mode" : "Solo mode"}
+            </div>
+          </div>
+        </div>
+
+        <button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch theme`}>
+          {theme === "light" ? "Dark" : "Light"}
         </button>
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <p>
-          Current theme: <strong>{theme}</strong>
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
       </header>
+
+      <main className="appMain">
+        {screen === SCREEN.HOME && <HomeScreen onStartSolo={handleStartSolo} />}
+        {screen === SCREEN.GAME && <Game onGameOver={handleGameOver} />}
+        {screen === SCREEN.RESULTS && (
+          <ResultsScreen
+            results={results}
+            onPlayAgain={handleStartSolo}
+            onBackHome={() => setScreen(SCREEN.HOME)}
+          />
+        )}
+      </main>
+
+      <footer className="appFooter">
+        <span className="muted">
+          Backend URLs are env-driven (e.g., REACT_APP_API_BASE / REACT_APP_WS_URL) but unused in this no-backend build.
+        </span>
+      </footer>
     </div>
   );
 }
