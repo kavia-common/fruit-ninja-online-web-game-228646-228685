@@ -10,8 +10,17 @@ function formatMs(ms) {
   return `${m}:${r.toString().padStart(2, "0")}`;
 }
 
+/**
+ * PUBLIC_INTERFACE
+ * Canvas game component: handles render loop, input capture, and local game state.
+ *
+ * Props:
+ * - onGameOver(payload): called when player chooses to view results
+ * - onExit(): navigate back
+ * - mode: "solo" | "multiplayer" (UI-only; gameplay is local for now)
+ */
 // PUBLIC_INTERFACE
-export default function Game({ onGameOver, onExit }) {
+export default function Game({ onGameOver, onExit, mode = "solo" }) {
   /** Canvas game component: handles render loop, input capture, and local game state. */
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -207,6 +216,12 @@ export default function Game({ onGameOver, onExit }) {
   return (
     <div className="gameRoot">
       <div className="gameTopBar">
+        <div className="gameStat">
+          <span className="gameStatLabel">Mode</span>
+          <span className="gameStatValue" style={{ textTransform: "capitalize" }}>
+            {mode}
+          </span>
+        </div>
         <div className="gameStat">
           <span className="gameStatLabel">Score</span>
           <span className="gameStatValue">{model.score}</span>

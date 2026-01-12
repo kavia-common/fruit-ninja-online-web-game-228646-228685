@@ -12,6 +12,7 @@ const SCREEN = Object.freeze({
   HOME: "home",
   SOLO: "solo",
   MULTIPLAYER: "multiplayer",
+  MULTIPLAYER_GAME: "multiplayer_game",
   RESULTS: "results",
   LEADERBOARD: "leaderboard",
   PROFILE: "profile"
@@ -79,6 +80,12 @@ function App() {
     setScreen(SCREEN.MULTIPLAYER);
   };
 
+  const handleStartMultiplayerMatch = () => {
+    // UI-only multiplayer game (no real sync yet). Never block if WS is unavailable.
+    setResults(null);
+    setScreen(SCREEN.MULTIPLAYER_GAME);
+  };
+
   const handleOpenLeaderboard = () => {
     setScreen(SCREEN.LEADERBOARD);
   };
@@ -120,9 +127,18 @@ function App() {
           />
         )}
 
-        {screen === SCREEN.SOLO && <Game onGameOver={handleGameOver} onExit={handleGoHome} />}
+        {screen === SCREEN.SOLO && <Game mode="solo" onGameOver={handleGameOver} onExit={handleGoHome} />}
 
-        {screen === SCREEN.MULTIPLAYER && <MultiplayerScreen onBackHome={handleGoHome} />}
+        {screen === SCREEN.MULTIPLAYER && (
+          <MultiplayerScreen
+            onBackHome={handleGoHome}
+            onStartMatch={() => {
+              handleStartMultiplayerMatch();
+            }}
+          />
+        )}
+
+        {screen === SCREEN.MULTIPLAYER_GAME && <Game mode="multiplayer" onGameOver={handleGameOver} onExit={handleGoHome} />}
 
         {screen === SCREEN.RESULTS && (
           <ResultsScreen
