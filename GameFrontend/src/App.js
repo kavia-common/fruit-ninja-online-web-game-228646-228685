@@ -4,6 +4,7 @@ import Game from "./components/Game";
 import HomeScreen from "./components/HomeScreen";
 import MultiplayerScreen from "./components/MultiplayerScreen";
 import ResultsScreen from "./components/ResultsScreen";
+import { runHealthCheck } from "./api/health";
 
 const SCREEN = Object.freeze({
   HOME: "home",
@@ -27,6 +28,32 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+
+  // Best-effort backend reachability check (non-blocking, no UI changes).
+  // This is a stub integration point for future Home/Results indicators.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const result = await runHealthCheck();
+        if (cancelled) return;
+
+        // Keep logs dev-only; no UI changes for now.
+        const isDev = String(process.env.REACT_APP_NODE_ENV || "").toLowerCase() === "development";
+        if (isDev) {
+          // eslint-disable-next-line no-console
+          console.log("[healthCheck]", result);
+        }
+      } catch (e) {
+        // Swallow errors to avoid impacting screens; offline-first behavior.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // PUBLIC_INTERFACE
   const toggleTheme = () => {
