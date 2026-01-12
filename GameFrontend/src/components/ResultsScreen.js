@@ -49,6 +49,7 @@ export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
   }, []);
 
   // Best-effort submit score once per results screen mount.
+  // Never blocks navigation; errors are surfaced as a small status line only.
   useEffect(() => {
     let cancelled = false;
 
@@ -63,8 +64,17 @@ export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
 
       const name = (profile && typeof profile.name === "string" && profile.name) || defaultName;
 
+      // Requirements payload: { score, duration, timestamp, mode: "solo" }
+      const payload = {
+        name,
+        score,
+        duration: Number.isFinite(results?.elapsedMs) ? Math.max(0, results.elapsedMs) : 0,
+        timestamp: new Date().toISOString(),
+        mode: "solo"
+      };
+
       try {
-        const res = await apiClient.submitScore({ name, score });
+        const res = await apiClient.submitScore(payload);
 
         if (cancelled) return;
 
@@ -89,7 +99,7 @@ export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
     return () => {
       cancelled = true;
     };
-  }, [defaultName, profile, score]);
+  }, [defaultName, profile, results?.elapsedMs, score]);
 
   const profileLabel = profile?.isMock ? "Offline Profile (mock)" : profile ? "Profile" : "Profile (unavailable)";
 

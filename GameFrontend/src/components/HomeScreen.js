@@ -1,13 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { apiClient } from "../api/restClient";
+import LeaderboardPreview from "./LeaderboardPreview";
 
 // PUBLIC_INTERFACE
-export default function HomeScreen({ onStartSolo, onStartMultiplayer }) {
-  /** Home screen: entry point to start solo, or go to multiplayer placeholder. */
+export default function HomeScreen({ onStartSolo, onStartMultiplayer, onViewLeaderboard }) {
+  /** Home screen: entry point to start solo, or go to multiplayer placeholder, and show leaderboard preview. */
 
   const [backend, setBackend] = useState(() => ({ loading: true, mode: "offline", isMock: true }));
-  const [topScores, setTopScores] = useState(() => []);
-  const [scoresLoading, setScoresLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,29 +19,6 @@ export default function HomeScreen({ onStartSolo, onStartMultiplayer }) {
       } catch (e) {
         if (cancelled) return;
         setBackend({ loading: false, mode: "offline", isMock: true, error: String(e) });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      setScoresLoading(true);
-      try {
-        const scores = await apiClient.getTopScores();
-        if (cancelled) return;
-        setTopScores(Array.isArray(scores) ? scores.slice(0, 3) : []);
-      } catch (e) {
-        // getTopScores() already mock-falls-back; but keep defensive.
-        if (cancelled) return;
-        setTopScores([]);
-      } finally {
-        if (!cancelled) setScoresLoading(false);
       }
     })();
 
@@ -72,23 +48,12 @@ export default function HomeScreen({ onStartSolo, onStartMultiplayer }) {
           </div>
 
           <div className="resultItem">
-            <div className="resultLabel">Top Scores</div>
-            <div className="resultValue" style={{ fontSize: 18, lineHeight: 1.35 }}>
-              {scoresLoading ? (
-                <span className="muted">Loading…</span>
-              ) : topScores.length ? (
-                <ol style={{ margin: "6px 0 0", paddingLeft: 18, textAlign: "left" }}>
-                  {topScores.map((row, idx) => (
-                    <li key={`${row.name}-${row.score}-${idx}`}>
-                      <strong>{row.score}</strong> — {row.name}
-                      {row.isMock ? <span className="muted"> (mock)</span> : null}
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <span className="muted">No data</span>
-              )}
-            </div>
+            <LeaderboardPreview
+              limit={5}
+              onViewFull={() => {
+                if (typeof onViewLeaderboard === "function") onViewLeaderboard();
+              }}
+            />
           </div>
         </div>
 

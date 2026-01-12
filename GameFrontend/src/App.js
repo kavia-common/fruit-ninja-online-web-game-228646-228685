@@ -4,13 +4,15 @@ import Game from "./components/Game";
 import HomeScreen from "./components/HomeScreen";
 import MultiplayerScreen from "./components/MultiplayerScreen";
 import ResultsScreen from "./components/ResultsScreen";
+import LeaderboardScreen from "./components/LeaderboardScreen";
 import { runHealthCheck } from "./api/health";
 
 const SCREEN = Object.freeze({
   HOME: "home",
   SOLO: "solo",
   MULTIPLAYER: "multiplayer",
-  RESULTS: "results"
+  RESULTS: "results",
+  LEADERBOARD: "leaderboard"
 });
 
 // PUBLIC_INTERFACE
@@ -75,6 +77,10 @@ function App() {
     setScreen(SCREEN.MULTIPLAYER);
   };
 
+  const handleOpenLeaderboard = () => {
+    setScreen(SCREEN.LEADERBOARD);
+  };
+
   const handleGameOver = (payload) => {
     setResults(payload);
     setScreen(SCREEN.RESULTS);
@@ -100,7 +106,11 @@ function App() {
 
       <main className="appMain">
         {screen === SCREEN.HOME && (
-          <HomeScreen onStartSolo={handleStartSolo} onStartMultiplayer={handleOpenMultiplayer} />
+          <HomeScreen
+            onStartSolo={handleStartSolo}
+            onStartMultiplayer={handleOpenMultiplayer}
+            onViewLeaderboard={handleOpenLeaderboard}
+          />
         )}
 
         {screen === SCREEN.SOLO && <Game onGameOver={handleGameOver} onExit={handleGoHome} />}
@@ -110,6 +120,8 @@ function App() {
         {screen === SCREEN.RESULTS && (
           <ResultsScreen results={results} onPlayAgain={handleStartSolo} onBackHome={handleGoHome} />
         )}
+
+        {screen === SCREEN.LEADERBOARD && <LeaderboardScreen onBack={handleGoHome} />}
       </main>
 
       <footer className="appFooter">

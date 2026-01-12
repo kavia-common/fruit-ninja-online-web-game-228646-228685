@@ -327,6 +327,139 @@
   margin-top: 6px;
 }
 
+/* Leaderboard */
+.leaderboardHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.leaderboardMeta {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.leaderboardTableWrap {
+  margin-top: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow: auto;
+  max-height: 52vh;
+}
+
+.leaderboardTableWrap:focus {
+  outline: 3px solid rgba(96, 165, 250, 0.55);
+  outline-offset: 2px;
+}
+
+.leaderboardTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px; /* enables horizontal scroll on very small screens */
+}
+
+.leaderboardTable th,
+.leaderboardTable td {
+  padding: 12px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+}
+
+.leaderboardTable th {
+  position: sticky;
+  top: 0;
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.leaderboardRank {
+  font-weight: 900;
+}
+
+.leaderboardDate {
+  opacity: 0.85;
+}
+
+.leaderboardEmpty {
+  margin-top: 14px;
+  border: 1px dashed var(--border-color);
+  border-radius: 14px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Preview */
+.leaderboardPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.leaderboardPreviewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.leaderboardPreviewTitle {
+  margin-top: 6px;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.leaderboardPreviewList {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.leaderboardPreviewRow {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.leaderboardPreviewRank {
+  font-weight: 900;
+  opacity: 0.85;
+}
+
+.leaderboardPreviewName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboardPreviewScore {
+  font-weight: 900;
+}
+
+.leaderboardPreviewDate {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
 @media (max-width: 768px) {
   .appMain {
     padding: 12px;
@@ -336,5 +469,8 @@
   }
   .resultsGrid {
     grid-template-columns: 1fr;
+  }
+  .leaderboardTable {
+    min-width: 460px;
   }
 }
