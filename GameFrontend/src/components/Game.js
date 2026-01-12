@@ -40,6 +40,7 @@ export default function Game({ onGameOver }) {
   const rafRef = useRef(0);
   const lastRef = useRef(performance.now());
 
+  // Keep a small, recent swipe trail for segment intersection checks + rendering.
   const swipe = useSwipeInput(canvasRef, { maxPoints: 28, maxAgeMs: 160 });
 
   // Responsive sizing: fit to container while keeping a nice aspect.
@@ -86,12 +87,14 @@ export default function Game({ onGameOver }) {
       const dtMs = Math.min(40, Math.max(0, now - lastRef.current));
       lastRef.current = now;
 
+      // Read points once per frame for consistent sim + render.
+      const points = swipe.getPoints();
+
       setModel((prev) => {
         // Advance sim only when running.
         const stepped = running ? stepGame(prev, dtMs, now, { rand }) : prev;
 
-        // Apply simple slicing while swiping (placeholder hit logic).
-        const points = swipe.getPoints();
+        // Apply slicing while swiping using segment-vs-circle intersection.
         const sliced = running ? sliceAtPoints(stepped, points, now) : stepped;
 
         // If game is over, stop loop and notify parent (after render).
@@ -114,8 +117,6 @@ export default function Game({ onGameOver }) {
         return sliced;
       });
 
-      // Render: always paint latest model snapshot from state in a separate read.
-      // We'll re-render using the current React state value in a follow-up effect.
       rafRef.current = requestAnimationFrame(loop);
     };
 
@@ -143,7 +144,12 @@ export default function Game({ onGameOver }) {
     if (!ctx) return;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    renderGame(ctx, model, { showDebug: debugEnabled, swipePoints: debugEnabled ? swipe.getPoints() : undefined });
+
+    // Always draw swipe feedback; in debug also keep extra overlays.
+    renderGame(ctx, model, {
+      showDebug: debugEnabled,
+      swipePoints: swipe.getPoints()
+    });
   }, [debugEnabled, model, size.height, size.width, swipe]);
 
   const handleStart = () => {

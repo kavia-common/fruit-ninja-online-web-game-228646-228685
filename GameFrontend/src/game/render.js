@@ -24,13 +24,18 @@ export function renderGame(ctx, model, opts = {}) {
     }
   }
 
+  // Effects (slash flashes)
+  if (Array.isArray(model.effects)) {
+    drawEffects(ctx, model.effects, performance.now());
+  }
+
+  // Swipe path overlay: always show subtle fading stroke for player feedback.
+  if (Array.isArray(opts.swipePoints)) {
+    drawSwipeStroke(ctx, opts.swipePoints, performance.now(), { strong: showDebug });
+  }
+
   // HUD
   drawHud(ctx, model, w, h);
-
-  // Swipe path overlay (debug/help)
-  if (showDebug && Array.isArray(opts.swipePoints)) {
-    drawSwipePath(ctx, opts.swipePoints);
-  }
 
   if (showDebug) {
     drawDebug(ctx, model, w, h);
@@ -171,27 +176,96 @@ function drawCenteredText(ctx, w, h, title, subtitle) {
   ctx.restore();
 }
 
-function drawSwipePath(ctx, points) {
-  if (points.length < 2) return;
+function drawSwipeStroke(ctx, points, nowMs, opts = {}) {
+  if (!points || points.length < 2) return;
+
+  // Fade based on age; use a slightly longer fade window than capture maxAge for smoothness.
+  const fadeWindowMs = 200;
+
+  const pts = points
+    .filter((p) => p && typeof p.x === "number" && typeof p.y === "number" && typeof p.t === "number")
+    .slice(-32);
+
+  if (pts.length < 2) return;
 
   ctx.save();
-  ctx.strokeStyle = "rgba(59,130,246,0.85)";
-  ctx.lineWidth = 3;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
-  ctx.stroke();
+  // Slight glow.
+  ctx.shadowColor = "rgba(147,197,253,0.55)";
+  ctx.shadowBlur = opts.strong ? 10 : 6;
+
+  // Draw per-segment so each segment can fade with its own age.
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+
+    const age = nowMs - b.t;
+    const alpha = 1 - Math.min(1, Math.max(0, age / fadeWindowMs));
+    if (alpha <= 0.02) continue;
+
+    ctx.strokeStyle = `rgba(96,165,250,${0.55 * alpha})`;
+    ctx.lineWidth = 4.5 * (0.55 + 0.45 * alpha);
+
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    // inner brighter core
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = `rgba(255,255,255,${0.28 * alpha})`;
+    ctx.lineWidth = 2.0 * (0.7 + 0.3 * alpha);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    ctx.shadowBlur = opts.strong ? 10 : 6;
+  }
 
   ctx.restore();
+}
+
+function drawEffects(ctx, effects, nowMs) {
+  for (const fx of effects) {
+    if (!fx || fx.type !== "slash" || !Array.isArray(fx.points)) continue;
+
+    const ttl = typeof fx.ttlMs === "number" ? fx.ttlMs : 120;
+    const age = nowMs - fx.bornAtMs;
+    const alpha = 1 - Math.min(1, Math.max(0, age / ttl));
+    if (alpha <= 0) continue;
+
+    ctx.save();
+    ctx.globalAlpha = 0.9 * alpha;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    ctx.strokeStyle = "rgba(255,255,255,1)";
+    ctx.lineWidth = 6;
+
+    ctx.beginPath();
+    ctx.moveTo(fx.points[0].x, fx.points[0].y);
+    for (let i = 1; i < fx.points.length; i++) ctx.lineTo(fx.points[i].x, fx.points[i].y);
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.35 * alpha;
+    ctx.strokeStyle = "rgba(96,165,250,1)";
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.moveTo(fx.points[0].x, fx.points[0].y);
+    for (let i = 1; i < fx.points.length; i++) ctx.lineTo(fx.points[i].x, fx.points[i].y);
+    ctx.stroke();
+
+    ctx.restore();
+  }
 }
 
 function drawDebug(ctx, model, w, h) {
   ctx.save();
   ctx.fillStyle = "rgba(0,0,0,0.55)";
-  ctx.fillRect(w - 180, 8, 172, 74);
+  ctx.fillRect(w - 180, 8, 172, 92);
 
   ctx.fillStyle = "rgba(255,255,255,0.9)";
   ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
@@ -200,6 +274,7 @@ function drawDebug(ctx, model, w, h) {
   const lines = [
     `phase: ${model.phase}`,
     `entities: ${model.entities.length}`,
+    `effects: ${(model.effects || []).length}`,
     `spawn(ms): ${model.config.spawnIntervalMs}`,
     `gravity: ${model.config.gravityPxPerS2}`
   ];

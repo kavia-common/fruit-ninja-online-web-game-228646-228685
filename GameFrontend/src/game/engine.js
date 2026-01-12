@@ -1,9 +1,10 @@
-//
 // Core, self-contained game engine (no network calls).
 // Provides: entity update/spawn logic + simulation step.
 //
 // Intentionally framework-agnostic so it can be tested/used from React.
 //
+
+import { sliceEntities } from "./slicing";
 
 /**
  * @typedef {'fruit'|'bomb'} EntityType
@@ -49,6 +50,7 @@
  * @property {Entity[]} entities
  * @property {number} lastSpawnAtMs
  * @property {GameConfig} config
+ * @property {Array<any>} [effects]
  */
 
 const DEFAULT_CONFIG = Object.freeze({
@@ -65,7 +67,7 @@ function mulberry32(seed) {
   // Small deterministic PRNG for repeatability/debug if desired.
   let t = seed >>> 0;
   return function rand() {
-    t += 0x6D2B79F5;
+    t += 0x6d2b79f5;
     let r = Math.imul(t ^ (t >>> 15), 1 | t);
     r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
     return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
@@ -92,7 +94,7 @@ function pickFruitColor(rand) {
     "#FFD43B", // lemon-ish
     "#69DB7C", // melon-ish
     "#4DABF7", // blueberry-ish
-    "#B197FC"  // grape-ish
+    "#B197FC" // grape-ish
   ];
   return palette[Math.floor(rand() * palette.length)];
 }
@@ -115,7 +117,8 @@ export function createInitialGameModel(options = {}) {
     elapsedMs: 0,
     entities: [],
     lastSpawnAtMs: nowMs,
-    config
+    config,
+    effects: []
   };
 }
 
@@ -130,7 +133,8 @@ export function startGame(model, nowMs = performance.now()) {
     startTimeMs: nowMs,
     elapsedMs: 0,
     entities: [],
-    lastSpawnAtMs: nowMs
+    lastSpawnAtMs: nowMs,
+    effects: []
   };
 }
 
@@ -196,7 +200,15 @@ export function stepGame(model, dtMs, nowMs, options = {}) {
     });
   }
 
-  next = { ...next, entities, lives };
+  // Update + prune effects (e.g., slash flashes).
+  const effects = Array.isArray(next.effects) ? next.effects : [];
+  const prunedEffects = effects.filter((fx) => {
+    if (!fx || typeof fx.bornAtMs !== "number") return false;
+    const ttl = typeof fx.ttlMs === "number" ? fx.ttlMs : 0;
+    return nowMs - fx.bornAtMs <= ttl;
+  });
+
+  next = { ...next, entities, lives, effects: prunedEffects };
 
   // End condition.
   if (next.lives <= 0) {
@@ -250,50 +262,8 @@ export function getDeterministicRand(seed = 123456) {
 // PUBLIC_INTERFACE
 export function sliceAtPoints(model, points, nowMs = performance.now()) {
   /**
-   * Placeholder slicing: if any point is within entity radius, consider it "hit".
-   * - Fruit: +1 score
-   * - Bomb: immediate game over (common Fruit Ninja rule)
-   *
-   * NOTE: This is intentionally simple; swipe-segment intersection can be added later.
+   * Apply slicing from the recent swipe trail using line-segment vs circle tests.
+   * Delegates to sliceEntities(), kept here for backwards compatibility with Game.js imports.
    */
-  if (model.phase !== "running") return model;
-  if (!points || points.length === 0) return model;
-
-  const hitIds = new Set();
-  for (const p of points) {
-    for (const e of model.entities) {
-      const dx = p.x - e.x;
-      const dy = p.y - e.y;
-      if (dx * dx + dy * dy <= e.radius * e.radius) {
-        hitIds.add(e.id);
-      }
-    }
-  }
-
-  if (hitIds.size === 0) return model;
-
-  let score = model.score;
-  let phase = model.phase;
-
-  const remaining = [];
-  for (const e of model.entities) {
-    if (!hitIds.has(e.id)) {
-      remaining.push(e);
-      continue;
-    }
-    if (e.type === "bomb") {
-      phase = "gameOver";
-    } else {
-      score += 1;
-    }
-  }
-
-  return {
-    ...model,
-    score,
-    entities: remaining,
-    phase,
-    // Keep elapsed time consistent
-    elapsedMs: Math.max(0, nowMs - model.startTimeMs)
-  };
+  return sliceEntities(model, points, nowMs);
 }
