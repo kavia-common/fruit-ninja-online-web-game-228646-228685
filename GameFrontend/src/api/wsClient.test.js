@@ -70,6 +70,9 @@ describe("wsClient", () => {
     // Ensure we don't accidentally use real env set by CI.
     delete process.env.REACT_APP_WS_URL;
 
+    // Jest runs in jsdom; ensure global WebSocket exists for wsClient's readyState checks.
+    global.WebSocket = FakeWebSocket;
+
     __setWebSocketImplForTests(FakeWebSocket);
   });
 
@@ -98,7 +101,7 @@ describe("wsClient", () => {
   test("queues outbound messages until connection opens, then flushes", async () => {
     process.env.REACT_APP_WS_URL = "ws://example.test";
 
-    connect({ path: "/ws" });
+    connect({ path: "/ws", autoReconnect: false });
 
     // We should have constructed a FakeWebSocket but not yet opened it.
     expect(FakeWebSocket.instances.length).toBe(1);
@@ -109,9 +112,10 @@ describe("wsClient", () => {
     expect(getStatus().queued).toBe(1);
     expect(inst.sent.length).toBe(0);
 
-    // Open connection -> should flush.
+    // Install listener before opening so we don't miss the event.
+    const openPromise = once("open");
     inst.__open();
-    await once("open");
+    await openPromise;
 
     expect(getStatus().queued).toBe(0);
     expect(inst.sent.length).toBe(1);
@@ -124,11 +128,13 @@ describe("wsClient", () => {
   test('emits custom event for JSON message with shape { "event": "...", "data": ... }', async () => {
     process.env.REACT_APP_WS_URL = "ws://example.test";
 
-    connect({ path: "/ws" });
+    connect({ path: "/ws", autoReconnect: false });
 
     const inst = FakeWebSocket.instances[0];
+
+    const openPromise = once("open");
     inst.__open();
-    await once("open");
+    await openPromise;
 
     const received = [];
     const off = subscribe("roomJoined", (payload) => received.push(payload));
