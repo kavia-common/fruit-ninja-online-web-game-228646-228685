@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/restClient";
+import { useProfile } from "../profile/useProfile";
 
 function formatMs(ms) {
   const s = Math.floor(ms / 1000);
@@ -8,8 +9,8 @@ function formatMs(ms) {
   return `${m}:${r.toString().padStart(2, "0")}`;
 }
 
-// PUBLIC_INTERFACE
-export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
+ // PUBLIC_INTERFACE
+export default function ResultsScreen({ results, onPlayAgain, onBackHome, onViewProfile }) {
   /** Results screen: shows score and duration, offers play again. */
 
   const score = results?.score ?? 0;
@@ -20,33 +21,14 @@ export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
     return n;
   }, [score]);
 
-  const [profile, setProfile] = useState(null);
+  const profileApi = useProfile({ auto: true });
+
   const [submitState, setSubmitState] = useState(() => ({
     loading: false,
     done: false,
     isMock: false,
     message: ""
   }));
-
-  // Demonstrate profile call without requiring auth; will return mock profile offline.
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const p = await apiClient.getProfile();
-        if (cancelled) return;
-        setProfile(p);
-      } catch (e) {
-        if (cancelled) return;
-        setProfile(null);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Best-effort submit score once per results screen mount.
   // Never blocks navigation; errors are surfaced as a small status line only.
@@ -62,7 +44,7 @@ export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
 
       setSubmitState({ loading: true, done: false, isMock: false, message: "Submitting score…" });
 
-      const name = (profile && typeof profile.name === "string" && profile.name) || defaultName;
+      const name = (profileApi.profile && typeof profileApi.profile.name === "string" && profileApi.profile.name) || defaultName;
 
       // Requirements payload: { score, duration, timestamp, mode: "solo" }
       const payload = {
@@ -99,9 +81,9 @@ export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
     return () => {
       cancelled = true;
     };
-  }, [defaultName, profile, results?.elapsedMs, score]);
+  }, [defaultName, profileApi.profile, results?.elapsedMs, score]);
 
-  const profileLabel = profile?.isMock ? "Offline Profile (mock)" : profile ? "Profile" : "Profile (unavailable)";
+  const profileLabel = profileApi.profile?.isMock ? "Offline Profile (mock)" : profileApi.profile ? "Profile" : "Profile (unavailable)";
 
   return (
     <div className="screen">
@@ -122,7 +104,12 @@ export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
           <div className="resultItem">
             <div className="resultLabel">{profileLabel}</div>
             <div className="resultValue" style={{ fontSize: 18 }}>
-              {profile?.name || "—"}
+              {profileApi.profile?.name || "—"}
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+              {profileApi.loading ? "Loading…" : profileApi.isSignedIn ? "Signed in (basic)" : "Not signed in"}
+              {profileApi.source ? ` • ${profileApi.source}` : ""}
+              {profileApi.profile?.isMock ? " (mock)" : ""}
             </div>
           </div>
 
@@ -141,6 +128,14 @@ export default function ResultsScreen({ results, onPlayAgain, onBackHome }) {
           </button>
           <button className="btn btn-secondary" onClick={onBackHome}>
             Back Home
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              if (typeof onViewProfile === "function") onViewProfile();
+            }}
+          >
+            Profile
           </button>
         </div>
 

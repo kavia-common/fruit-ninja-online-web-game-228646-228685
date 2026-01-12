@@ -1,12 +1,18 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/restClient";
 import LeaderboardPreview from "./LeaderboardPreview";
+import { useProfile } from "../profile/useProfile";
+
+function safeTrim(s) {
+  return typeof s === "string" ? s.trim() : "";
+}
 
 // PUBLIC_INTERFACE
-export default function HomeScreen({ onStartSolo, onStartMultiplayer, onViewLeaderboard }) {
-  /** Home screen: entry point to start solo, or go to multiplayer placeholder, and show leaderboard preview. */
+export default function HomeScreen({ onStartSolo, onStartMultiplayer, onViewLeaderboard, onViewProfile }) {
+  /** Home screen: entry point to start solo, or go to multiplayer placeholder UI, show profile + leaderboard preview. */
 
   const [backend, setBackend] = useState(() => ({ loading: true, mode: "offline", isMock: true }));
+  const profileApi = useProfile({ auto: true });
 
   useEffect(() => {
     let cancelled = false;
@@ -33,13 +39,29 @@ export default function HomeScreen({ onStartSolo, onStartMultiplayer, onViewLead
       ? `Online (${backend.latencyMs ?? 0}ms)`
       : "Offline (mock)";
 
+  const profileName = safeTrim(profileApi.profile?.name) || "Guest";
+  const avatarText = safeTrim(profileApi.profile?.avatar);
+  const profileStatus = profileApi.loading
+    ? "Loading…"
+    : profileApi.isSignedIn
+      ? profileApi.source === "remote"
+        ? "Signed in (synced)"
+        : "Signed in (local)"
+      : "Not signed in";
+
+  const profileHint = profileApi.isSignedIn
+    ? "Used for score submissions when available."
+    : "Optional: set name/avatar to personalize scores.";
+
+  const hasProfileError = Boolean(profileApi.error);
+
   return (
     <div className="screen">
       <div className="card">
         <h1 className="title">Fruit Ninja Online</h1>
         <p className="subtitle">Choose a mode. Solo is playable now; Multiplayer is a placeholder UI for upcoming backend.</p>
 
-        <div className="resultsGrid" aria-label="Connectivity and leaderboard preview">
+        <div className="resultsGrid" aria-label="Connectivity, profile and leaderboard preview">
           <div className="resultItem">
             <div className="resultLabel">Backend</div>
             <div className="resultValue" style={{ fontSize: 18 }}>
@@ -48,6 +70,40 @@ export default function HomeScreen({ onStartSolo, onStartMultiplayer, onViewLead
           </div>
 
           <div className="resultItem">
+            <div className="resultLabel">Profile</div>
+            <div className="profileMiniRow" aria-label="Current player profile summary">
+              <div className="profileMiniAvatar" aria-hidden="true">
+                {avatarText ? avatarText.slice(0, 2) : "—"}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div className="profileMiniName" title={profileName}>
+                  {profileName}
+                </div>
+                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                  {profileStatus} • {profileHint}
+                </div>
+              </div>
+            </div>
+
+            {hasProfileError ? (
+              <div className="muted" style={{ fontSize: 12, marginTop: 10 }} role="status">
+                Offline: using local profile.
+              </div>
+            ) : null}
+
+            <div className="actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  if (typeof onViewProfile === "function") onViewProfile();
+                }}
+              >
+                {profileApi.isSignedIn ? "Edit profile" : "Set up profile"}
+              </button>
+            </div>
+          </div>
+
+          <div className="resultItem" style={{ gridColumn: "1 / -1" }}>
             <LeaderboardPreview
               limit={5}
               onViewFull={() => {
