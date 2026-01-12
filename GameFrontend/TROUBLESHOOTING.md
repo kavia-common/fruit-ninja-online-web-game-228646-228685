@@ -29,7 +29,9 @@ PORT=3000 BROWSER=none CI=true npm start
 ```
 
 ### Notes
-Startup may show non-blocking warnings such as:
-- Browserslist DB out of date
+Startup may show **non-blocking warnings** such as:
+- `Browserslist: browsers data (caniuse-lite) is ... old` (can be fixed via `npx update-browserslist-db@latest`)
+- Webpack dev server deprecation warnings (from `react-scripts`/webpack internals)
 - ESLint warnings about unused variables
-These do not prevent the dev server from running.
+
+These do not prevent the dev server from running; the preview should still load if the server is listening on port `3000`.
