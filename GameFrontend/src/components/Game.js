@@ -11,7 +11,7 @@ function formatMs(ms) {
 }
 
 // PUBLIC_INTERFACE
-export default function Game({ onGameOver }) {
+export default function Game({ onGameOver, onExit }) {
   /** Canvas game component: handles render loop, input capture, and local game state. */
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -36,6 +36,10 @@ export default function Game({ onGameOver }) {
   );
 
   const [running, setRunning] = useState(false);
+
+  // This is a UI-only acknowledgement that the player saw "Game Over".
+  // It prevents double-firing parent navigation / results.
+  const [gameOverHandled, setGameOverHandled] = useState(false);
 
   const rafRef = useRef(0);
   const lastRef = useRef(performance.now());
@@ -71,6 +75,20 @@ export default function Game({ onGameOver }) {
     }));
   }, [size.width, size.height]);
 
+  const hardPause = () => {
+    // Called when we must ensure sim is paused (pause overlay / game over / leaving tab).
+    setRunning(false);
+  };
+
+  // Auto-pause on tab switch to avoid accidental loss.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.hidden) hardPause();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
   // Main RAF loop (start/pause/cleanup).
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -97,21 +115,10 @@ export default function Game({ onGameOver }) {
         // Apply slicing while swiping using segment-vs-circle intersection.
         const sliced = running ? sliceAtPoints(stepped, points, now) : stepped;
 
-        // If game is over, stop loop and notify parent (after render).
+        // If game is over, stop sim (but do not auto-navigate away; show overlay).
         if (prev.phase !== "gameOver" && sliced.phase === "gameOver") {
-          // Stop input points to avoid accidental extra hits.
           swipe.clearPoints();
           setRunning(false);
-
-          // Notify parent with results.
-          if (typeof onGameOver === "function") {
-            const payload = {
-              score: sliced.score,
-              elapsedMs: sliced.elapsedMs
-            };
-            // Defer to allow React state to commit cleanly.
-            setTimeout(() => onGameOver(payload), 0);
-          }
         }
 
         return sliced;
@@ -126,7 +133,7 @@ export default function Game({ onGameOver }) {
       mounted = false;
       cancelAnimationFrame(rafRef.current);
     };
-  }, [onGameOver, rand, running, swipe]);
+  }, [rand, running, swipe]);
 
   // Render whenever model changes.
   useEffect(() => {
@@ -155,6 +162,7 @@ export default function Game({ onGameOver }) {
   const handleStart = () => {
     const now = performance.now();
     swipe.clearPoints();
+    setGameOverHandled(false);
     setModel((m) =>
       startGame(
         {
@@ -169,9 +177,32 @@ export default function Game({ onGameOver }) {
   };
 
   const handlePauseToggle = () => {
+    // Only allow pausing/resuming during active running phase.
     if (model.phase !== "running") return;
     setRunning((r) => !r);
   };
+
+  const handleExit = () => {
+    hardPause();
+    if (typeof onExit === "function") onExit();
+  };
+
+  const handleShowResults = () => {
+    if (gameOverHandled) return;
+    setGameOverHandled(true);
+
+    if (typeof onGameOver === "function") {
+      const payload = {
+        score: model.score,
+        elapsedMs: model.elapsedMs
+      };
+      onGameOver(payload);
+    }
+  };
+
+  const isPaused = model.phase === "running" && !running;
+  const showInGameActions = model.phase === "running";
+  const isGameOver = model.phase === "gameOver";
 
   return (
     <div className="gameRoot">
@@ -190,44 +221,91 @@ export default function Game({ onGameOver }) {
         </div>
 
         <div className="gameTopActions">
-          {model.phase !== "running" ? (
+          {model.phase === "idle" && (
             <button className="btn btn-primary" onClick={handleStart}>
               Start
             </button>
-          ) : (
-            <button className="btn btn-secondary" onClick={handlePauseToggle}>
-              {running ? "Pause" : "Resume"}
-            </button>
+          )}
+
+          {showInGameActions && (
+            <>
+              <button className="btn btn-secondary" onClick={handlePauseToggle}>
+                {running ? "Pause" : "Resume"}
+              </button>
+              <button className="btn" onClick={handleExit}>
+                Exit
+              </button>
+            </>
+          )}
+
+          {isGameOver && (
+            <>
+              <button className="btn btn-primary" onClick={handleStart}>
+                Restart
+              </button>
+              <button className="btn btn-secondary" onClick={handleShowResults}>
+                Results
+              </button>
+            </>
           )}
         </div>
       </div>
 
       <div className="gameCanvasShell" ref={containerRef}>
-        <canvas
-          ref={canvasRef}
-          className="gameCanvas"
-          role="application"
-          aria-label="Fruit Ninja canvas game"
-        />
-        {!running && model.phase === "running" && (
-          <div className="gameOverlay">
+        <canvas ref={canvasRef} className="gameCanvas" role="application" aria-label="Fruit Ninja canvas game" />
+
+        {isPaused && (
+          <div className="gameOverlay" role="dialog" aria-label="Paused overlay">
             <div className="gameOverlayCard">
               <div className="gameOverlayTitle">Paused</div>
-              <div className="gameOverlaySub">Swipe to slice fruits; avoid bombs.</div>
-              <button className="btn btn-primary" onClick={() => setRunning(true)}>
-                Resume
-              </button>
+              <div className="gameOverlaySub">Resume when ready. Tip: quick swipes work best.</div>
+              <div className="actions">
+                <button className="btn btn-primary" onClick={() => setRunning(true)}>
+                  Resume
+                </button>
+                <button className="btn btn-secondary" onClick={handleExit}>
+                  Exit to Home
+                </button>
+              </div>
             </div>
           </div>
         )}
+
         {model.phase === "idle" && (
-          <div className="gameOverlay">
+          <div className="gameOverlay" role="dialog" aria-label="Start overlay">
             <div className="gameOverlayCard">
               <div className="gameOverlayTitle">Fruit Ninja Online</div>
-              <div className="gameOverlaySub">Swipe across the canvas to slice.</div>
-              <button className="btn btn-primary" onClick={handleStart}>
-                Start Solo
-              </button>
+              <div className="gameOverlaySub">Swipe across the canvas to slice fruits. Avoid bombs.</div>
+              <div className="actions">
+                <button className="btn btn-primary" onClick={handleStart}>
+                  Start Solo
+                </button>
+                <button className="btn btn-secondary" onClick={handleExit}>
+                  Back Home
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isGameOver && (
+          <div className="gameOverlay" role="dialog" aria-label="Game over overlay">
+            <div className="gameOverlayCard">
+              <div className="gameOverlayTitle">Game Over</div>
+              <div className="gameOverlaySub">
+                Final score: <strong>{model.score}</strong> • Time: <strong>{formatMs(model.elapsedMs)}</strong>
+              </div>
+              <div className="actions">
+                <button className="btn btn-primary" onClick={handleStart}>
+                  Restart
+                </button>
+                <button className="btn btn-secondary" onClick={handleShowResults}>
+                  View Results
+                </button>
+                <button className="btn" onClick={handleExit}>
+                  Exit
+                </button>
+              </div>
             </div>
           </div>
         )}
